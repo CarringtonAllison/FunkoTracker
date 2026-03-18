@@ -11,22 +11,18 @@ import type { ScraperOutput } from '../types/funko.js';
 const SYSTEM_PROMPT = `You are a web scraping agent for Funko Pop! tracker application.
 Your job is to gather information from funko.com by using the provided scraping tools.
 
-You MUST call all three tools:
+You MUST call this tool:
 1. scrape_new_releases — to get new product releases
-2. scrape_back_in_stock — to get restocked products
-3. scrape_news_updates — to get news and announcements
 
-After calling all three tools, respond with a JSON object in this exact format:
+After calling the tool, respond with a JSON object in this exact format:
 {
   "new_releases": [...scraped products...],
-  "back_in_stock": [...restocked products...],
-  "news_updates": [...news articles...],
+  "back_in_stock": [],
+  "news_updates": [],
   "scraped_at": "ISO timestamp"
 }
 
-Each product should have: title, price, image_url, product_url, product_line, available_date (for new releases) or restocked_at (for back in stock).
-Each news item should have: headline, summary, article_url, published_at, category.
-
+Each product should have: title, price, image_url, product_url, product_line.
 Use null for missing fields. Do not make up data — only return what the tools provide.`;
 
 export async function runScraperAgent(browser: Browser): Promise<ScraperOutput> {
@@ -36,7 +32,7 @@ export async function runScraperAgent(browser: Browser): Promise<ScraperOutput> 
   const messages: Anthropic.MessageParam[] = [
     {
       role: 'user',
-      content: 'Please scrape funko.com for new releases, back in stock items, and news updates. Call all three scraping tools and return the results as JSON.',
+      content: 'Please scrape funko.com for new releases only. Call the scrape_new_releases tool and return the results as JSON.',
     },
   ];
 
@@ -107,6 +103,8 @@ export async function runScraperAgent(browser: Browser): Promise<ScraperOutput> 
               (input.max_items as number) ?? 30,
               (input.page_url as string) ?? undefined
             );
+            console.log(`[Agent1] Raw scrape_new_releases result (${(result as unknown[]).length} items):`);
+            console.log(JSON.stringify(result, null, 2));
             break;
 
           case 'scrape_back_in_stock':

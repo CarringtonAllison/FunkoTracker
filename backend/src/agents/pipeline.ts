@@ -21,6 +21,17 @@ export async function runPipeline(): Promise<PipelineResult> {
     // Agent 1 — scrape funko.com
     const scraperOutput = await runScraperAgent(browser);
 
+    const totalScraped =
+      scraperOutput.new_releases.length +
+      scraperOutput.back_in_stock.length +
+      scraperOutput.news_updates.length;
+
+    if (totalScraped === 0) {
+      console.warn('[Pipeline] Scraper returned 0 items — skipping Agent 2 and logging as success with 0 counts.');
+      logFetchRun('success');
+      return { status: 'success', ran_at, new_items_count: 0, updated_items_count: 0 };
+    }
+
     // Agent 2 — deduplicate and persist to SQLite
     const summary: ProcessorSummary = await runProcessorAgent(scraperOutput);
 

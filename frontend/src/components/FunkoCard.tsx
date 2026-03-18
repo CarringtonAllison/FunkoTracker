@@ -4,13 +4,15 @@ type FunkoCardProps = {
   item: NewRelease | BackInStockItem;
   badge?: string;
   badgeColor?: 'orange' | 'red';
+  variantBadge?: string;
+  variantBadgeClass?: string;
 };
 
 function isNewRelease(item: NewRelease | BackInStockItem): item is NewRelease {
   return 'available_date' in item;
 }
 
-export default function FunkoCard({ item, badge, badgeColor = 'orange' }: FunkoCardProps) {
+export default function FunkoCard({ item, badge, badgeColor = 'orange', variantBadge, variantBadgeClass }: FunkoCardProps) {
   const badgeClass =
     badgeColor === 'red'
       ? 'bg-funko-red text-white'
@@ -45,6 +47,11 @@ export default function FunkoCard({ item, badge, badgeColor = 'orange' }: FunkoC
         {badge && (
           <span className={`absolute top-2 left-2 text-xs font-bold px-2 py-1 rounded-full ${badgeClass}`}>
             {badge}
+          </span>
+        )}
+        {variantBadge && (
+          <span className={`absolute bottom-2 right-2 text-xs font-bold px-2 py-1 rounded-full uppercase tracking-wide ${variantBadgeClass}`}>
+            {variantBadge}
           </span>
         )}
       </div>

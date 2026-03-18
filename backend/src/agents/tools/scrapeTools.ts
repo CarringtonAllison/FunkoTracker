@@ -18,6 +18,9 @@ const JUNK_PATTERNS = [
   /subscribe/i,
   /your (cart|bag)/i,
   /^(home|shop|account|search|menu)$/i,
+  /onetrust/i,
+  /powered by/i,
+  /skip to/i,
 ];
 
 function isJunkTitle(title: string): boolean {
@@ -42,15 +45,44 @@ async function getPage(browser: Browser): Promise<Page> {
 export async function scrapeNewReleases(
   browser: Browser,
   max_items = 30,
-  page_url = 'https://www.funko.com/collections/new-releases'
+  page_url = 'https://funko.com/new-featured/new-releases/'
 ): Promise<ScrapedProduct[]> {
   const page = await getPage(browser);
 
   try {
     // domcontentloaded is reliable on SPAs; networkidle often times out
-    await page.goto(page_url, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT });
-    await page.waitForSelector('a[href*="/products/"]', { timeout: SELECTOR_TIMEOUT }).catch(() => null);
+    // Use 'load' so all scripts fire before we start reading the DOM
+    await page.goto(page_url, { waitUntil: 'load', timeout: NAVIGATION_TIMEOUT });
+
+    // Scroll to bottom to trigger lazy-loaded product grids, then back to top
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.waitForTimeout(2000);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(2000);
+
+    // Debug: log page title, selector counts, and a snippet of inner HTML
+    const debugInfo = await page.evaluate(() => {
+      const counts: Record<string, number> = {};
+      const selectors = [
+        '.product-tile', '.tile-body', '.pdp-link',
+        '.product-item', '.grid__item', '[data-product-id]',
+        'article.product', '.collection-product-card', '.product-card',
+        'a[href*="/products/"]', 'a[href*="/new-releases/"]',
+        '[class*="product"]', '[class*="tile"]',
+      ];
+      for (const sel of selectors) counts[sel] = document.querySelectorAll(sel).length;
+      const allClasses = new Set<string>();
+      document.querySelectorAll('[class]').forEach((el) => {
+        el.className.toString().split(/\s+/).forEach((c) => { if (c) allClasses.add(c); });
+      });
+      // Grab first 3000 chars of body HTML so we can see real structure
+      const bodySnippet = document.body.innerHTML.substring(0, 3000);
+      return { title: document.title, url: location.href, counts, sampleClasses: [...allClasses].slice(0, 80), bodySnippet };
+    });
+    console.log(`[scrapeNewReleases] Page: "${debugInfo.title}" | URL: ${debugInfo.url}`);
+    console.log('[scrapeNewReleases] Selector counts:', JSON.stringify(debugInfo.counts));
+    console.log('[scrapeNewReleases] Sample classes:', debugInfo.sampleClasses.join(', '));
+    console.log('[scrapeNewReleases] Body HTML snippet:\n', debugInfo.bodySnippet);
 
     const products = await page.evaluate(() => {
       const items: Array<{
@@ -58,7 +90,17 @@ export async function scrapeNewReleases(
         product_url?: string; product_line?: string;
       }> = [];
 
-      const selectors = ['.product-item', '.grid__item', '[data-product-id]', 'article.product', '.collection-product-card', '.product-card'];
+      // Funko uses Salesforce Commerce Cloud — primary selector is .product-tile
+      const selectors = [
+        '.product-tile',
+        '.tile-body',
+        '.product-item',
+        '.grid__item',
+        '[data-product-id]',
+        'article.product',
+        '.product-card',
+      ];
+
       let productEls: NodeListOf<Element> | null = null;
       for (const sel of selectors) {
         const found = document.querySelectorAll(sel);
@@ -66,7 +108,8 @@ export async function scrapeNewReleases(
       }
 
       if (!productEls || productEls.length === 0) {
-        document.querySelectorAll('a[href*="/products/"]').forEach((el) => {
+        // Last resort: any internal product links
+        document.querySelectorAll('a[href*="/products/"], a[href*="/new-releases/"]').forEach((el) => {
           const anchor = el as HTMLAnchorElement;
           const title = anchor.textContent?.trim() || anchor.getAttribute('aria-label') || '';
           if (title && !items.find((i) => i.title === title)) {
@@ -77,22 +120,23 @@ export async function scrapeNewReleases(
       }
 
       productEls.forEach((el) => {
-        const titleEl = el.querySelector('.product-title, .card__heading, h2, h3, [class*="title"]') ?? el.querySelector('a');
-        const priceEl = el.querySelector('.price, .product-price, [class*="price"]');
-        const imgEl = el.querySelector('img');
-        const linkEl = el.querySelector('a[href*="/products/"]') ?? el.querySelector('a');
+        // SFCC tile structure: .pdp-link for title+URL, .price .sales .value for price
+        const linkEl = el.querySelector('.pdp-link a, a.pdp-link') as HTMLAnchorElement | null
+          ?? el.querySelector('a[href*="/products/"], a[href*="funko.com"]') as HTMLAnchorElement | null;
+        const titleEl = el.querySelector('.pdp-link, .tile-body h3, .tile-body h2, [class*="product-name"], [class*="product-title"]')
+          ?? linkEl;
+        const priceEl = el.querySelector('.price .sales .value, .price-sales, .sales, .price, [class*="price"]');
+        const imgEl = el.querySelector('img.tile-image, .product-image img, img') as HTMLImageElement | null;
 
         const title = titleEl?.textContent?.trim() ?? '';
         if (!title) return;
 
         const price = priceEl?.textContent?.trim().replace(/\s+/g, ' ') ?? undefined;
         const image_url = imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? undefined;
-        const href = (linkEl as HTMLAnchorElement)?.href ?? undefined;
+        const href = linkEl?.href ?? undefined;
         const product_url = href && !href.startsWith('javascript') ? href : undefined;
-        const tagEl = el.querySelector('.product-tag, .badge, [class*="collection"], [class*="vendor"]');
-        const product_line = tagEl?.textContent?.trim() ?? undefined;
 
-        items.push({ title, price, image_url, product_url, product_line });
+        items.push({ title, price, image_url, product_url });
       });
 
       return items.slice(0, 30);
@@ -254,7 +298,7 @@ export const SCRAPER_TOOL_DEFINITIONS = [
       type: 'object' as const,
       properties: {
         max_items: { type: 'number', description: 'Maximum items to return (default 30)' },
-        page_url: { type: 'string', description: 'URL to scrape (default: https://www.funko.com/collections/new-releases)' },
+        page_url: { type: 'string', description: 'URL to scrape (default: https://funko.com/new-featured/new-releases/)' },
       },
       required: [],
     },

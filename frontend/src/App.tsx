@@ -5,6 +5,7 @@ import FunkoCard from './components/FunkoCard';
 import NewsCard from './components/NewsCard';
 import SectionHeader from './components/SectionHeader';
 import EmptyState from './components/EmptyState';
+import { buildVariantMap } from './utils/variants';
 
 const queryClient = new QueryClient();
 
@@ -55,15 +56,30 @@ function Dashboard() {
             count={data?.new_releases.length ?? 0}
             accentColor="orange"
           />
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-            {data?.new_releases.length ? (
-              data.new_releases.map((item) => (
-                <FunkoCard key={item.external_id} item={item} badge="NEW" badgeColor="orange" />
-              ))
-            ) : (
-              <EmptyState message="No new releases found. Hit Refresh Now to fetch the latest." />
-            )}
-          </div>
+          {(() => {
+            const variantMap = buildVariantMap(data?.new_releases ?? []);
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                {data?.new_releases.length ? (
+                  data.new_releases.map((item) => {
+                    const v = variantMap.get(item.external_id);
+                    return (
+                      <FunkoCard
+                        key={item.external_id}
+                        item={item}
+                        badge="NEW"
+                        badgeColor="orange"
+                        variantBadge={v?.variantLabel ?? undefined}
+                        variantBadgeClass={v?.variantClass}
+                      />
+                    );
+                  })
+                ) : (
+                  <EmptyState message="No new releases found. Hit Refresh Now to fetch the latest." />
+                )}
+              </div>
+            );
+          })()}
         </section>
 
         {/* Back in Stock */}
@@ -73,15 +89,30 @@ function Dashboard() {
             count={data?.back_in_stock.length ?? 0}
             accentColor="red"
           />
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-            {data?.back_in_stock.length ? (
-              data.back_in_stock.map((item) => (
-                <FunkoCard key={item.external_id} item={item} badge="BACK" badgeColor="red" />
-              ))
-            ) : (
-              <EmptyState message="No back-in-stock items found." />
-            )}
-          </div>
+          {(() => {
+            const variantMap = buildVariantMap(data?.back_in_stock ?? []);
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                {data?.back_in_stock.length ? (
+                  data.back_in_stock.map((item) => {
+                    const v = variantMap.get(item.external_id);
+                    return (
+                      <FunkoCard
+                        key={item.external_id}
+                        item={item}
+                        badge="BACK"
+                        badgeColor="red"
+                        variantBadge={v?.variantLabel ?? undefined}
+                        variantBadgeClass={v?.variantClass}
+                      />
+                    );
+                  })
+                ) : (
+                  <EmptyState message="No back-in-stock items found." />
+                )}
+              </div>
+            );
+          })()}
         </section>
 
         {/* News & Updates */}

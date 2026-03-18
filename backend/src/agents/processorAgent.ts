@@ -144,7 +144,10 @@ export async function runProcessorAgent(scraperOutput: ScraperOutput): Promise<P
       });
     }
 
-    messages.push({ role: 'user', content: toolResults });
+    // Only push if there are actual results — empty content crashes the API
+    if (toolResults.length > 0) {
+      messages.push({ role: 'user', content: toolResults });
+    }
   }
 
   logFetchRun('error', 'Max loops exceeded');
