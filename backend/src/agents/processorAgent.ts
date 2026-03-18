@@ -60,7 +60,7 @@ export async function runProcessorAgent(scraperOutput: ScraperOutput): Promise<P
     console.log(`[Agent2] Loop ${loopCount}...`);
 
     const response = await client.messages.create({
-      model: 'claude-opus-4-6',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 8192,
       system: SYSTEM_PROMPT,
       tools: PROCESSOR_TOOL_DEFINITIONS as Anthropic.Tool[],
