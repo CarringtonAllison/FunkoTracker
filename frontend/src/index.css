@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@theme {
+  --color-funko-orange: #F26522;
+  --color-funko-red: #E31837;
+  --color-funko-dark: #1A1A1A;
+  --color-funko-darker: #111111;
+  --color-funko-gray: #2A2A2A;
+  --color-funko-light: #F5F5F5;
+
+  --font-family-display: 'Segoe UI', system-ui, sans-serif;
+}
+
+body {
+  background-color: #1A1A1A;
+  color: #F5F5F5;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  margin: 0;
+}
