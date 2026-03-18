@@ -8,8 +8,6 @@ import {
 } from './tools/scrapeTools.js';
 import type { ScraperOutput } from '../types/funko.js';
 
-const client = new Anthropic();
-
 const SYSTEM_PROMPT = `You are a web scraping agent for Funko Pop! tracker application.
 Your job is to gather information from funko.com by using the provided scraping tools.
 
@@ -32,6 +30,7 @@ Each news item should have: headline, summary, article_url, published_at, catego
 Use null for missing fields. Do not make up data — only return what the tools provide.`;
 
 export async function runScraperAgent(browser: Browser): Promise<ScraperOutput> {
+  const client = new Anthropic();
   console.log('[Agent1] Starting scraper agent...');
 
   const messages: Anthropic.MessageParam[] = [

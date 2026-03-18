@@ -9,8 +9,6 @@ import {
 import { logFetchRun } from '../db/queries.js';
 import type { ScraperOutput, ScrapedProduct, ScrapedNewsItem } from '../types/funko.js';
 
-const client = new Anthropic();
-
 export interface ProcessorSummary {
   inserted: number;
   updated: number;
@@ -39,6 +37,7 @@ Rules:
 Only include data that was actually in the payload. Do not invent or modify data.`;
 
 export async function runProcessorAgent(scraperOutput: ScraperOutput): Promise<ProcessorSummary> {
+  const client = new Anthropic();
   console.log('[Agent2] Starting processor agent...');
   console.log(
     `[Agent2] Input — New releases: ${scraperOutput.new_releases.length}, ` +
