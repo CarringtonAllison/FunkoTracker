@@ -4,7 +4,10 @@ import { fileURLToPath } from 'url';
 
 // Resolve .env from project root regardless of cwd
 const __dirname = dirname(fileURLToPath(import.meta.url));
-config({ path: resolve(__dirname, '../../../.env') });
+const envPath = resolve(__dirname, '../../.env');
+config({ path: envPath });
+console.log(`[Env] Loaded from: ${envPath}`);
+console.log(`[Env] ANTHROPIC_API_KEY set: ${!!process.env.ANTHROPIC_API_KEY}`);
 
 import express from 'express';
 import cors from 'cors';
