@@ -1,4 +1,11 @@
-import 'dotenv/config';
+import { config } from 'dotenv';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+// Resolve .env from project root regardless of cwd
+const __dirname = dirname(fileURLToPath(import.meta.url));
+config({ path: resolve(__dirname, '../../../.env') });
+
 import express from 'express';
 import cors from 'cors';
 import { runMigrations } from './db/migrations.js';
