@@ -29,12 +29,12 @@ For EACH item in each array, call the appropriate tool:
 - upsert_news_item — for each item in news_updates
 
 Rules:
-1. Call the tools for EVERY item — do not skip any.
+1. Call the tools for EVERY item — do not skip any, even if the data looks wrong or low quality.
 2. Do not batch items. Call the tool once per item.
-3. After processing all items, respond with a JSON summary:
+3. ALWAYS end your final response with ONLY this JSON on its own line — no other text after it:
    { "inserted": <count>, "updated": <count>, "skipped": <count> }
-
-Only include data that was actually in the payload. Do not invent or modify data.`;
+4. If all arrays are empty, still respond with: { "inserted": 0, "updated": 0, "skipped": 0 }
+5. Never explain, comment, or add prose after the JSON summary.`;
 
 export async function runProcessorAgent(scraperOutput: ScraperOutput): Promise<ProcessorSummary> {
   const client = new Anthropic();
@@ -54,6 +54,7 @@ export async function runProcessorAgent(scraperOutput: ScraperOutput): Promise<P
 
   let loopCount = 0;
   const MAX_LOOPS = 20;
+  const toolResultCounts = { inserted: 0, updated: 0, skipped: 0 };
 
   while (loopCount < MAX_LOOPS) {
     loopCount++;
@@ -71,21 +72,26 @@ export async function runProcessorAgent(scraperOutput: ScraperOutput): Promise<P
 
     if (response.stop_reason === 'end_turn') {
       const textBlock = response.content.find((b) => b.type === 'text');
-      if (!textBlock || textBlock.type !== 'text') {
-        throw new Error('[Agent2] No text response in final turn');
+      const text = textBlock?.type === 'text' ? textBlock.text : '';
+
+      // Try to parse the JSON summary from the response
+      const jsonMatch = text.match(/\{\s*"inserted"\s*:\s*\d+[\s\S]*?\}/);
+      if (jsonMatch) {
+        try {
+          const summary = JSON.parse(jsonMatch[0]) as ProcessorSummary;
+          console.log(`[Agent2] Done. Inserted: ${summary.inserted}, Updated: ${summary.updated}, Skipped: ${summary.skipped}`);
+          logFetchRun('success');
+          return summary;
+        } catch {
+          // fall through to fallback below
+        }
       }
 
-      const text = textBlock.text;
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('[Agent2] Could not find summary JSON in response: ' + text.substring(0, 200));
-      }
-
-      const summary = JSON.parse(jsonMatch[0]) as ProcessorSummary;
-      console.log(`[Agent2] Done. Inserted: ${summary.inserted}, Updated: ${summary.updated}, Skipped: ${summary.skipped}`);
-
+      // Fallback: Agent responded in prose instead of JSON (e.g. explained bad data).
+      // Count what was actually saved via tools already executed this session.
+      console.warn(`[Agent2] No JSON summary in response — using tool-result counts as fallback. Response: "${text.substring(0, 150)}"`);
       logFetchRun('success');
-      return summary;
+      return { inserted: toolResultCounts.inserted, updated: toolResultCounts.updated, skipped: toolResultCounts.skipped };
     }
 
     if (response.stop_reason !== 'tool_use') {
@@ -120,10 +126,15 @@ export async function runProcessorAgent(scraperOutput: ScraperOutput): Promise<P
           default:
             throw new Error(`Unknown tool: ${block.name}`);
         }
+        // Track counts for fallback summary
+        if (result.action === 'inserted') toolResultCounts.inserted++;
+        else if (result.action === 'updated') toolResultCounts.updated++;
+        else toolResultCounts.skipped++;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[Agent2] Tool error (${block.name}): ${msg}`);
         result = { action: 'skipped', external_id: '', title: String(input.title ?? input.headline ?? '') };
+        toolResultCounts.skipped++;
       }
 
       toolResults.push({

@@ -98,7 +98,7 @@ describe('POST /api/refresh rate limiting', () => {
     // At least one of them must be a 429 (in-progress block)
     const statuses = [first.status, second.status];
     expect(statuses).toContain(429);
-  });
+  }, 30000); // 30s: browser launch + fast auth failure can take up to 20s
 });
 
 // ─── 404 handling ─────────────────────────────────────────────────────────────

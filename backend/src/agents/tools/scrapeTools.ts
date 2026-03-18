@@ -1,6 +1,30 @@
 import type { Browser, Page } from 'playwright';
 import type { ScrapedProduct, ScrapedNewsItem } from '../../types/funko.js';
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const NAVIGATION_TIMEOUT = 60000; // 60s — enough for slow JS-heavy pages
+const SELECTOR_TIMEOUT = 10000;
+
+// Phrases that indicate a scraped "item" is actually a cookie banner,
+// nav element, or other page chrome — not a real product or article.
+const JUNK_PATTERNS = [
+  /cookie/i,
+  /accept all/i,
+  /privacy policy/i,
+  /terms of (use|service)/i,
+  /sign (in|up)/i,
+  /newsletter/i,
+  /subscribe/i,
+  /your (cart|bag)/i,
+  /^(home|shop|account|search|menu)$/i,
+];
+
+function isJunkTitle(title: string): boolean {
+  if (!title || title.length < 4) return true;
+  return JUNK_PATTERNS.some((re) => re.test(title));
+}
+
 // ─── Playwright helpers ───────────────────────────────────────────────────────
 
 async function getPage(browser: Browser): Promise<Page> {
@@ -8,9 +32,7 @@ async function getPage(browser: Browser): Promise<Page> {
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
       '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    extraHTTPHeaders: {
-      'Accept-Language': 'en-US,en;q=0.9',
-    },
+    extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' },
   });
   return context.newPage();
 }
@@ -23,68 +45,39 @@ export async function scrapeNewReleases(
   page_url = 'https://www.funko.com/collections/new-releases'
 ): Promise<ScrapedProduct[]> {
   const page = await getPage(browser);
-  const results: ScrapedProduct[] = [];
 
   try {
-    await page.goto(page_url, { waitUntil: 'networkidle', timeout: 30000 });
-
-    // Wait for product grid
-    await page.waitForSelector(
-      '.product-grid, .collection-grid, [data-product-id], .product-item, .grid__item, article',
-      { timeout: 15000 }
-    ).catch(() => null);
-
-    // Small delay to allow JS rendering
+    // domcontentloaded is reliable on SPAs; networkidle often times out
+    await page.goto(page_url, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT });
+    await page.waitForSelector('a[href*="/products/"]', { timeout: SELECTOR_TIMEOUT }).catch(() => null);
     await page.waitForTimeout(2000);
 
     const products = await page.evaluate(() => {
       const items: Array<{
-        title: string;
-        price?: string;
-        image_url?: string;
-        product_url?: string;
-        product_line?: string;
-        available_date?: string;
+        title: string; price?: string; image_url?: string;
+        product_url?: string; product_line?: string;
       }> = [];
 
-      // Try multiple common Shopify/ecommerce selectors
-      const selectors = [
-        '.product-item',
-        '.grid__item',
-        '[data-product-id]',
-        'article.product',
-        '.collection-product-card',
-        '.product-card',
-      ];
-
+      const selectors = ['.product-item', '.grid__item', '[data-product-id]', 'article.product', '.collection-product-card', '.product-card'];
       let productEls: NodeListOf<Element> | null = null;
       for (const sel of selectors) {
         const found = document.querySelectorAll(sel);
-        if (found.length > 0) {
-          productEls = found;
-          break;
-        }
+        if (found.length > 0) { productEls = found; break; }
       }
 
       if (!productEls || productEls.length === 0) {
-        // Fallback: grab all links with /products/ in href
         document.querySelectorAll('a[href*="/products/"]').forEach((el) => {
           const anchor = el as HTMLAnchorElement;
           const title = anchor.textContent?.trim() || anchor.getAttribute('aria-label') || '';
           if (title && !items.find((i) => i.title === title)) {
-            items.push({
-              title,
-              product_url: anchor.href,
-            });
+            items.push({ title, product_url: anchor.href });
           }
         });
         return items.slice(0, 30);
       }
 
       productEls.forEach((el) => {
-        const titleEl =
-          el.querySelector('.product-title, .card__heading, h2, h3, [class*="title"]') ??
-          el.querySelector('a');
+        const titleEl = el.querySelector('.product-title, .card__heading, h2, h3, [class*="title"]') ?? el.querySelector('a');
         const priceEl = el.querySelector('.price, .product-price, [class*="price"]');
         const imgEl = el.querySelector('img');
         const linkEl = el.querySelector('a[href*="/products/"]') ?? el.querySelector('a');
@@ -95,10 +88,7 @@ export async function scrapeNewReleases(
         const price = priceEl?.textContent?.trim().replace(/\s+/g, ' ') ?? undefined;
         const image_url = imgEl?.getAttribute('src') ?? imgEl?.getAttribute('data-src') ?? undefined;
         const href = (linkEl as HTMLAnchorElement)?.href ?? undefined;
-        const product_url =
-          href && !href.startsWith('javascript') ? href : undefined;
-
-        // Try to detect product line from breadcrumb or tag
+        const product_url = href && !href.startsWith('javascript') ? href : undefined;
         const tagEl = el.querySelector('.product-tag, .badge, [class*="collection"], [class*="vendor"]');
         const product_line = tagEl?.textContent?.trim() ?? undefined;
 
@@ -108,12 +98,12 @@ export async function scrapeNewReleases(
       return items.slice(0, 30);
     });
 
-    results.push(...(products as ScrapedProduct[]));
+    return (products as ScrapedProduct[])
+      .filter((p) => !isJunkTitle(p.title))
+      .slice(0, max_items);
   } finally {
     await page.close();
   }
-
-  return results.slice(0, max_items);
 }
 
 // ─── Tool: scrape_back_in_stock ───────────────────────────────────────────────
@@ -124,20 +114,16 @@ export async function scrapeBackInStock(
   page_url = 'https://www.funko.com/collections/back-in-stock'
 ): Promise<ScrapedProduct[]> {
   const page = await getPage(browser);
-  const results: ScrapedProduct[] = [];
 
   try {
-    await page.goto(page_url, { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForSelector('a[href*="/products/"]', { timeout: 15000 }).catch(() => null);
+    await page.goto(page_url, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT });
+    await page.waitForSelector('a[href*="/products/"]', { timeout: SELECTOR_TIMEOUT }).catch(() => null);
     await page.waitForTimeout(2000);
 
     const products = await page.evaluate(() => {
       const items: Array<{
-        title: string;
-        price?: string;
-        image_url?: string;
-        product_url?: string;
-        product_line?: string;
+        title: string; price?: string; image_url?: string;
+        product_url?: string; product_line?: string;
       }> = [];
 
       const selectors = ['.product-item', '.grid__item', '[data-product-id]', 'article.product', '.product-card'];
@@ -180,12 +166,12 @@ export async function scrapeBackInStock(
       return items.slice(0, 30);
     });
 
-    results.push(...(products as ScrapedProduct[]));
+    return (products as ScrapedProduct[])
+      .filter((p) => !isJunkTitle(p.title))
+      .slice(0, max_items);
   } finally {
     await page.close();
   }
-
-  return results.slice(0, max_items);
 }
 
 // ─── Tool: scrape_news_updates ────────────────────────────────────────────────
@@ -196,23 +182,18 @@ export async function scrapeNewsUpdates(
   page_url = 'https://www.funko.com/blogs/news'
 ): Promise<ScrapedNewsItem[]> {
   const page = await getPage(browser);
-  const results: ScrapedNewsItem[] = [];
 
   try {
-    await page.goto(page_url, { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForSelector('article, .blog-post, .article, [class*="blog"]', { timeout: 15000 }).catch(() => null);
+    await page.goto(page_url, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT });
+    await page.waitForSelector('a[href*="/blogs/"]', { timeout: SELECTOR_TIMEOUT }).catch(() => null);
     await page.waitForTimeout(2000);
 
     const articles = await page.evaluate(() => {
       const items: Array<{
-        headline: string;
-        summary?: string;
-        article_url?: string;
-        published_at?: string;
-        category?: string;
+        headline: string; summary?: string; article_url?: string;
+        published_at?: string; category?: string;
       }> = [];
 
-      // Try blog post selectors
       const selectors = ['article', '.blog-post', '.article-card', '.blog__article', '[class*="article"]'];
       let articleEls: NodeListOf<Element> | null = null;
       for (const sel of selectors) {
@@ -221,7 +202,6 @@ export async function scrapeNewsUpdates(
       }
 
       if (!articleEls || articleEls.length === 0) {
-        // Fallback: grab all blog links
         document.querySelectorAll('a[href*="/blogs/"]').forEach((el) => {
           const anchor = el as HTMLAnchorElement;
           const title = anchor.textContent?.trim() || anchor.getAttribute('aria-label') || '';
@@ -254,12 +234,12 @@ export async function scrapeNewsUpdates(
       return items.slice(0, 20);
     });
 
-    results.push(...(articles as ScrapedNewsItem[]));
+    return (articles as ScrapedNewsItem[])
+      .filter((a) => !isJunkTitle(a.headline))
+      .slice(0, max_items);
   } finally {
     await page.close();
   }
-
-  return results.slice(0, max_items);
 }
 
 // ─── Tool definitions for Claude ─────────────────────────────────────────────
@@ -274,26 +254,19 @@ export const SCRAPER_TOOL_DEFINITIONS = [
       type: 'object' as const,
       properties: {
         max_items: { type: 'number', description: 'Maximum items to return (default 30)' },
-        page_url: {
-          type: 'string',
-          description: 'URL to scrape (default: https://www.funko.com/collections/new-releases)',
-        },
+        page_url: { type: 'string', description: 'URL to scrape (default: https://www.funko.com/collections/new-releases)' },
       },
       required: [],
     },
   },
   {
     name: 'scrape_back_in_stock',
-    description:
-      'Navigate to funko.com back in stock section and extract all restocked product listings.',
+    description: 'Navigate to funko.com back in stock section and extract all restocked product listings.',
     input_schema: {
       type: 'object' as const,
       properties: {
         max_items: { type: 'number', description: 'Maximum items to return (default 30)' },
-        page_url: {
-          type: 'string',
-          description: 'URL to scrape (default: https://www.funko.com/collections/back-in-stock)',
-        },
+        page_url: { type: 'string', description: 'URL to scrape (default: https://www.funko.com/collections/back-in-stock)' },
       },
       required: [],
     },
@@ -301,16 +274,12 @@ export const SCRAPER_TOOL_DEFINITIONS = [
   {
     name: 'scrape_news_updates',
     description:
-      'Navigate to funko.com news/blog section and extract recent articles, ' +
-      'announcements, and convention updates.',
+      'Navigate to funko.com news/blog section and extract recent articles, announcements, and convention updates.',
     input_schema: {
       type: 'object' as const,
       properties: {
         max_items: { type: 'number', description: 'Maximum items to return (default 20)' },
-        page_url: {
-          type: 'string',
-          description: 'URL to scrape (default: https://www.funko.com/blogs/news)',
-        },
+        page_url: { type: 'string', description: 'URL to scrape (default: https://www.funko.com/blogs/news)' },
       },
       required: [],
     },
